@@ -91,6 +91,12 @@ export function getThread(messageId: number) {
   return request<ThreadResponse>(`/api/messages/${messageId}/thread`);
 }
 
+export function deleteMessage(messageId: number) {
+  return request<{ status: string; deleted_id: number }>(`/api/messages/${messageId}`, {
+    method: "DELETE",
+  });
+}
+
 export function updateMemo(roomId: number, memo: string) {
   return request<{ memo: string; has_unresolved_memo: boolean }>(`/api/rooms/${roomId}/memo`, {
     method: "PUT",

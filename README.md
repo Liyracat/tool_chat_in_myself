@@ -28,6 +28,7 @@ uvicorn main:app --reload
 ```
 
 The SQLite file is created automatically at `backend/chat.db`.
+Backend URL: `http://127.0.0.1:8000`
 
 ## Run frontend
 
@@ -38,3 +39,4 @@ npm run dev
 ```
 
 If needed, set `NEXT_PUBLIC_API_BASE=http://127.0.0.1:8000`.
+Frontend URL: `http://127.0.0.1:3000`

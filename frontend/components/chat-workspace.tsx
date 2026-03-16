@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, useTransition } from "react";
 import {
   createMessage,
   createRoom,
+  deleteMessage,
   getRoom,
   getThread,
   listMessages,
@@ -52,6 +53,7 @@ export function ChatWorkspace() {
   const [mode, setMode] = useState<DisplayMode>("chronological");
   const [filters, setFilters] = useState<MessageFilters>(defaultFilters);
   const [roomQuery, setRoomQuery] = useState("");
+  const [roomSearchInput, setRoomSearchInput] = useState("");
   const [composerSpeakerId, setComposerSpeakerId] = useState("");
   const [composerBody, setComposerBody] = useState("");
   const [replyTarget, setReplyTarget] = useState<Message | null>(null);
@@ -61,6 +63,7 @@ export function ChatWorkspace() {
   const [newRoomTitle, setNewRoomTitle] = useState("");
   const [newRoomDescription, setNewRoomDescription] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [copyNotice, setCopyNotice] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
   const selectedSpeaker = useMemo(
@@ -157,13 +160,32 @@ export function ChatWorkspace() {
     setRooms(roomsResult);
   }
 
-  async function handleRoomSearchChange(value: string) {
-    setRoomQuery(value);
+  async function handleRoomSearch() {
     try {
-      const roomsResult = await listRooms(value);
+      setRoomQuery(roomSearchInput);
+      const roomsResult = await listRooms(roomSearchInput);
       setRooms(roomsResult);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "部屋検索に失敗しました。");
+    }
+  }
+
+  async function handleCopyTimeline() {
+    if (!selectedRoomId) {
+      return;
+    }
+    try {
+      const allMessages = await listMessages(selectedRoomId, "chronological", defaultFilters);
+      const text = allMessages
+        .map(
+          (message) => `[${message.speaker_name}] [${formatDate(message.created_at)}]\n${message.body}`
+        )
+        .join("\n\n");
+      await navigator.clipboard.writeText(text);
+      setCopyNotice("時系列ログをコピーした。");
+      window.setTimeout(() => setCopyNotice(null), 2200);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "コピーに失敗しました。");
     }
   }
 
@@ -180,10 +202,30 @@ export function ChatWorkspace() {
         parent_id: replyTarget?.id ?? null,
       });
       setComposerBody("");
-      setReplyTarget(null);
       await Promise.all([loadMessages(selectedRoomId, mode, filters), loadRoom(selectedRoomId), refreshRooms()]);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "投稿に失敗しました。");
+    }
+  }
+
+  async function handleDeleteMessage(message: Message) {
+    const confirmed = window.confirm(`「${message.speaker_name}」の発言を削除する？`);
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setError(null);
+      await deleteMessage(message.id);
+      if (replyTarget?.id === message.id) {
+        setReplyTarget(null);
+      }
+      if (selectedMessage?.id === message.id) {
+        setSelectedMessage(null);
+      }
+      await Promise.all([loadMessages(message.room_id, mode, filters), loadRoom(message.room_id), refreshRooms()]);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "削除に失敗しました。");
     }
   }
 
@@ -262,6 +304,9 @@ export function ChatWorkspace() {
           <button type="button" className="ghost-button" onClick={() => openThreadFor(message)}>
             スレッド {message.reply_count > 0 ? `${message.reply_count}件` : "を見る"}
           </button>
+          <button type="button" className="ghost-button" onClick={() => void handleDeleteMessage(message)}>
+            削除
+          </button>
         </div>
       </article>
     );
@@ -282,16 +327,32 @@ export function ChatWorkspace() {
           </div>
           <p className="muted">議題は軽く切り替えて、ログは長く残す。</p>
           <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 10 }}>
-            <input
-              className="search-box"
-              placeholder="部屋を検索"
-              value={roomQuery}
-              onChange={(event) => {
-                startTransition(() => {
-                  void handleRoomSearchChange(event.target.value);
-                });
-              }}
-            />
+            <div className="search-row">
+              <input
+                className="search-box"
+                placeholder="部屋を検索"
+                value={roomSearchInput}
+                onChange={(event) => setRoomSearchInput(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    startTransition(() => {
+                      void handleRoomSearch();
+                    });
+                  }
+                }}
+              />
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={() => {
+                  startTransition(() => {
+                    void handleRoomSearch();
+                  });
+                }}
+              >
+                検索
+              </button>
+            </div>
             {showNewRoomForm ? (
               <div className="room-form">
                 <input
@@ -375,6 +436,9 @@ export function ChatWorkspace() {
               </div>
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 <div className="mode-toggle">
+                  <button type="button" className="ghost-button" onClick={() => void handleCopyTimeline()}>
+                    全体コピー
+                  </button>
                   <button
                     type="button"
                     className={`chip-button ${mode === "chronological" ? "active" : ""}`}
@@ -395,6 +459,12 @@ export function ChatWorkspace() {
                 </button>
               </div>
             </div>
+            <div className="header-actions">
+              <button type="button" className="ghost-button" onClick={() => void handleCopyTimeline()}>
+                時系列ログをコピー
+              </button>
+              {copyNotice ? <p className="muted">{copyNotice}</p> : null}
+            </div>
             {error ? <p className="muted" style={{ color: "#8d3f36", marginTop: 12 }}>{error}</p> : null}
           </div>
 
@@ -406,7 +476,8 @@ export function ChatWorkspace() {
             )}
           </div>
 
-          <div className="composer-wrap">
+          <div className="composer-float">
+            <div className="composer-wrap panel">
             {replyTarget ? (
               <div className="reply-banner">
                 <span>{replyTarget.speaker_name}の発言に返信中</span>
@@ -416,7 +487,7 @@ export function ChatWorkspace() {
               </div>
             ) : null}
             <div className="composer">
-              <div className="composer-controls">
+              <div className="composer-row">
                 <select value={composerSpeakerId} onChange={(event) => setComposerSpeakerId(event.target.value)}>
                   {speakers.map((speaker) => (
                     <option key={speaker.id} value={speaker.id}>
@@ -424,6 +495,17 @@ export function ChatWorkspace() {
                     </option>
                   ))}
                 </select>
+                <textarea
+                  placeholder="今の論点を一言でも残す"
+                  value={composerBody}
+                  onChange={(event) => setComposerBody(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && event.ctrlKey) {
+                      event.preventDefault();
+                      void handleSubmitMessage();
+                    }
+                  }}
+                />
                 <button
                   type="button"
                   className="primary-button"
@@ -433,11 +515,7 @@ export function ChatWorkspace() {
                   投稿
                 </button>
               </div>
-              <textarea
-                placeholder="今の論点を一言でも残す"
-                value={composerBody}
-                onChange={(event) => setComposerBody(event.target.value)}
-              />
+            </div>
             </div>
           </div>
         </section>
@@ -458,6 +536,7 @@ export function ChatWorkspace() {
             setReplyTarget(message);
             setShowDetailPane(false);
           }}
+          onDeleteMessage={(message) => void handleDeleteMessage(message)}
           onChangeFilters={setFilters}
         />
 
@@ -478,6 +557,7 @@ export function ChatWorkspace() {
                 setReplyTarget(message);
                 setShowDetailPane(false);
               }}
+              onDeleteMessage={(message) => void handleDeleteMessage(message)}
               onChangeFilters={setFilters}
             />
           </div>
@@ -500,6 +580,7 @@ function DetailPane(props: {
   onChangeMemo: (memo: string) => void;
   onSaveMemo: () => void;
   onReplyTo: (message: Message) => void;
+  onDeleteMessage: (message: Message) => void;
   onChangeFilters: (filters: MessageFilters) => void;
 }) {
   return (
@@ -526,6 +607,7 @@ function DetailPaneContent(props: {
   onChangeMemo: (memo: string) => void;
   onSaveMemo: () => void;
   onReplyTo: (message: Message) => void;
+  onDeleteMessage: (message: Message) => void;
   onChangeFilters: (filters: MessageFilters) => void;
 }) {
   return (
@@ -565,9 +647,14 @@ function DetailPaneContent(props: {
                     {props.thread.root.speaker_name}
                   </div>
                   <p className="message-body">{props.thread.root.body}</p>
-                  <button type="button" className="ghost-button" onClick={() => props.onReplyTo(props.thread.root)}>
-                    この発言に返信
-                  </button>
+                  <div className="thread-actions">
+                    <button type="button" className="ghost-button" onClick={() => props.onReplyTo(props.thread.root)}>
+                      この発言に返信
+                    </button>
+                    <button type="button" className="ghost-button" onClick={() => props.onDeleteMessage(props.thread.root)}>
+                      削除
+                    </button>
+                  </div>
                 </div>
                 {props.thread.replies.length > 0 ? (
                   props.thread.replies.map((reply) => (
@@ -577,7 +664,12 @@ function DetailPaneContent(props: {
                         {reply.speaker_name}
                       </div>
                       <p className="message-body">{reply.body}</p>
-                      <p className="muted">{formatDate(reply.created_at)}</p>
+                      <div className="thread-actions">
+                        <p className="muted">{formatDate(reply.created_at)}</p>
+                        <button type="button" className="ghost-button" onClick={() => props.onDeleteMessage(reply)}>
+                          削除
+                        </button>
+                      </div>
                     </div>
                   ))
                 ) : (

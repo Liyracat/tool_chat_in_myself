@@ -8,6 +8,7 @@ from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -291,6 +292,52 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/", response_class=HTMLResponse)
+def root() -> str:
+    return """
+    <!doctype html>
+    <html lang="ja">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Inner Debate Chat API</title>
+        <style>
+          body {
+            font-family: "Yu Gothic UI", sans-serif;
+            background: #f7f0e6;
+            color: #2e241d;
+            margin: 0;
+            padding: 32px;
+            line-height: 1.7;
+          }
+          .card {
+            max-width: 760px;
+            margin: 0 auto;
+            padding: 24px;
+            background: #fffaf5;
+            border: 1px solid rgba(73, 55, 39, 0.14);
+            border-radius: 20px;
+          }
+          code {
+            background: rgba(184, 132, 103, 0.14);
+            padding: 2px 6px;
+            border-radius: 8px;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="card">
+          <h1>Inner Debate Chat API</h1>
+          <p>ここは FastAPI のバックエンドです。</p>
+          <p>API疎通確認: <code>/api/health</code></p>
+          <p>フロントエンドは通常 <code>http://127.0.0.1:3000</code> で起動します。</p>
+          <p>Next.js を起動しているのに画面が見えない場合は、フロント側の起動ポートを確認してください。</p>
+        </div>
+      </body>
+    </html>
+    """
+
+
 @app.get("/api/speakers", response_model=list[SpeakerResponse])
 def list_speakers() -> list[SpeakerResponse]:
     order_clause = "CASE id " + " ".join(
@@ -545,6 +592,28 @@ def create_message(payload: CreateMessageRequest) -> MessageResponse:
         ).fetchone()
 
     return MessageResponse.model_validate(message_row_to_dict(row))
+
+
+@app.delete("/api/messages/{message_id}")
+def delete_message(message_id: int) -> dict[str, object]:
+    with closing(get_connection()) as connection:
+        row = connection.execute(
+            "SELECT id, room_id FROM messages WHERE id = ?",
+            (message_id,),
+        ).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="Message not found")
+
+        # Keep replies in the room by promoting them to root messages.
+        connection.execute(
+            "UPDATE messages SET parent_id = NULL WHERE parent_id = ?",
+            (message_id,),
+        )
+        connection.execute("DELETE FROM messages WHERE id = ?", (message_id,))
+        recalc_room_updated_at(connection, row["room_id"])
+        connection.commit()
+
+    return {"status": "ok", "deleted_id": message_id}
 
 
 @app.get("/api/rooms/{room_id}/memo")
