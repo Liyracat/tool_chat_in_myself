@@ -330,7 +330,7 @@ def root() -> str:
           <h1>Inner Debate Chat API</h1>
           <p>ここは FastAPI のバックエンドです。</p>
           <p>API疎通確認: <code>/api/health</code></p>
-          <p>フロントエンドは通常 <code>http://127.0.0.1:3000</code> で起動します。</p>
+          <p>フロントエンドは通常 <code>http://127.0.0.1:3001</code> で起動します。</p>
           <p>Next.js を起動しているのに画面が見えない場合は、フロント側の起動ポートを確認してください。</p>
         </div>
       </body>
